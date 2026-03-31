@@ -1,0 +1,101 @@
+{
+  "title": "IBEX35 RAG — Production Dashboard",
+  "uid": "ibex35-rag",
+  "schemaVersion": 38,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Query Requests / min",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "rate(ibex35_rag_query_requests_total[1m]) * 60",
+          "legendFormat": "{{company}} cached={{cached}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Query Latency P50 / P95 / P99",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(ibex35_rag_query_latency_seconds_bucket[5m]))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(ibex35_rag_query_latency_seconds_bucket[5m]))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(ibex35_rag_query_latency_seconds_bucket[5m]))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Cache Hit Rate",
+      "type": "gauge",
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 8},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "minVizValue": 0, "maxVizValue": 100},
+      "targets": [
+        {
+          "expr": "rate(ibex35_rag_cache_hits_total[5m]) / (rate(ibex35_rag_cache_hits_total[5m]) + rate(ibex35_rag_cache_misses_total[5m]) + 0.0001) * 100",
+          "legendFormat": "Cache Hit %"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Agent Requests / min",
+      "type": "stat",
+      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 8},
+      "targets": [
+        {
+          "expr": "rate(ibex35_rag_agent_requests_total[1m]) * 60",
+          "legendFormat": "Agent req/min"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Vector Store Documents",
+      "type": "stat",
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 8},
+      "targets": [
+        {
+          "expr": "ibex35_rag_vector_store_documents_total",
+          "legendFormat": "Documents"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "HTTP Request Rate by Endpoint",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "targets": [
+        {
+          "expr": "rate(http_requests_total{job=\"ibex35-rag-api\"}[1m]) * 60",
+          "legendFormat": "{{handler}} {{method}} {{status_code}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "HTTP Error Rate (4xx + 5xx)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "targets": [
+        {
+          "expr": "rate(http_requests_total{status_code=~\"4..|5..\",job=\"ibex35-rag-api\"}[1m]) * 60",
+          "legendFormat": "{{status_code}} errors/min"
+        }
+      ]
+    }
+  ]
+}
