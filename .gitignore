@@ -12,3 +12,7 @@ mlruns/
 mlflow_artifacts/
 chroma_data/
 *.Zone.Identifier
+
+# Ignore .md, but not README.md
+*.md
+!README.md
