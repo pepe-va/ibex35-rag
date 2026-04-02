@@ -1,68 +1,93 @@
 # IBEX35 RAG
 
-Sistema RAG (*Retrieval-Augmented Generation*) para consultar resultados financieros de las empresas del IBEX35. Permite hacer preguntas en lenguaje natural sobre los informes anuales y combinarlas con datos de mercado en tiempo real.
+Sistema RAG para consultar resultados financieros de empresas del IBEX35 con documentos PDF, embeddings locales y un stack completo de observabilidad.
 
-## Stack
+## Qué hace
+
+El proyecto combina:
+
+- búsqueda semántica sobre informes financieros PDF
+- generación de respuestas con Ollama
+- un agente opcional que mezcla RAG con datos de mercado en tiempo real
+- observabilidad con métricas, logs y trazas
+
+Flujo principal:
+
+```text
+PDFs -> ingesta -> chunking -> embeddings -> ChromaDB
+Pregunta -> API -> retrieval -> Ollama -> respuesta
+```
+
+## Stack actual
 
 | Componente | Tecnología |
 |---|---|
-| LLM + Embeddings | Ollama (`llama3.2`, `nomic-embed-text`) |
-| RAG framework | LlamaIndex |
+| LLM | Ollama (`llama3.2:latest`) |
+| Embeddings | Ollama (`nomic-embed-text:latest`) |
+| Framework RAG | LlamaIndex |
 | Vector store | ChromaDB |
 | API | FastAPI + Pydantic v2 |
-| Caché + Rate limiting | Redis |
-| Experiment tracking | MLflow |
-| Métricas | Prometheus + Grafana |
+| Frontend | Chainlit |
+| Caché y rate limit | Redis |
+| Logs | Loki + Promtail |
+| Métricas | Prometheus |
+| Trazas | OpenTelemetry + Tempo |
+| Dashboards | Grafana |
+| Alertas | Alertmanager |
 | Infraestructura | Docker Compose |
 
-Todo corre localmente. No requiere API keys externas.
+El núcleo RAG funciona en local y no necesita API keys externas. El modo agente usa `yfinance`, así que para datos de mercado sí necesita conectividad saliente.
 
 ## Requisitos
 
 - Docker y Docker Compose
-- NVIDIA GPU con `nvidia-container-toolkit` (para Ollama con GPU)
-- Ollama con los modelos descargados:
-
-```bash
-ollama pull llama3.2
-ollama pull nomic-embed-text
-```
+- GPU NVIDIA con `nvidia-container-toolkit` si quieres acelerar Ollama por GPU
+- fichero `.env` a partir de [.env.example](.env.example)
 
 ## Arranque rápido
 
+La forma recomendada es usar el `Makefile`:
+
 ```bash
-# 1. Clonar y entrar al directorio
-git clone <repo>
-cd RAG
-
-# 2. Configurar entorno
 cp .env.example .env
-
-# 3. Levantar todos los servicios
-docker compose up -d
-
-# 4. Esperar a que estén listos (~60s) y verificar
-curl http://localhost:8080/health
-
-# 5. Indexar los PDFs (solo la primera vez)
-docker compose exec api python scripts/ingest.py
+make
+# o, si prefieres ser explícito:
+make start
 ```
 
-## Servicios disponibles
+`make` y `make start` hacen lo mismo: validan `.env`, levantan el stack, esperan a `ollama`/`chroma`/`redis`, validan modelos y ejecutan la ingesta inicial si la colección está vacía.
 
-| Servicio | URL | Descripción |
-|---|---|---|
-| API | http://localhost:8080/docs | Swagger UI con todos los endpoints |
-| Grafana | http://localhost:3000 | Dashboards (`admin` / `ibex35rag`) |
-| MLflow | http://localhost:5000 | Experiment tracking |
-| Prometheus | http://localhost:9090 | Métricas raw |
-| ChromaDB | http://localhost:8000 | Vector store |
+Si prefieres hacerlo a mano:
+
+```bash
+cp .env.example .env
+docker compose up -d
+docker compose exec -T api python scripts/ingest.py
+curl http://localhost:8080/health
+```
+
+## URLs útiles
+
+| Servicio | URL |
+|---|---|
+| Frontend | http://localhost:8501 |
+| API | http://localhost:8080 |
+| API docs | http://localhost:8080/docs |
+| ChromaDB | http://localhost:8000 |
+| Ollama | http://localhost:11434 |
+| Grafana | http://localhost:3000 |
+| Prometheus | http://localhost:9090 |
+| Loki | http://localhost:3100 |
+| Tempo | http://localhost:3200 |
+| Alertmanager | http://localhost:9093 |
+
+Las credenciales de Grafana salen de `.env`.
 
 ## Endpoints principales
 
-### `POST /api/v1/query` — Consulta RAG
+### `POST /api/v1/query`
 
-Busca en los informes financieros y genera una respuesta con el LLM.
+Consulta RAG sobre los PDFs indexados.
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/query \
@@ -73,28 +98,39 @@ curl -X POST http://localhost:8080/api/v1/query \
   }'
 ```
 
+Respuesta típica:
+
 ```json
 {
-  "answer": "El EBITDA de IBERDROLA en 2024 fue de 7.800M€...",
-  "sources": [{"company": "IBERDROLA", "ticker": "IBE.MC", "score": 0.91}],
+  "answer": "El EBITDA de IBERDROLA en 2024 fue ...",
+  "sources": [
+    {
+      "company": "IBERDROLA",
+      "ticker": "IBE.MC",
+      "score": 0.91
+    }
+  ],
   "latency_seconds": 1.8,
-  "from_cache": false
+  "from_cache": false,
+  "query": "¿Cuál fue el EBITDA de IBERDROLA en 2024?"
 }
 ```
 
-### `POST /api/v1/agent` — Agente financiero
+### `POST /api/v1/agent`
 
-Combina el RAG con datos de mercado en tiempo real (yfinance). Más lento pero puede responder preguntas que mezclan fundamentales y precio actual.
+Modo agente para combinar la base documental con datos de mercado.
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/agent \
   -H "Content-Type: application/json" \
   -d '{
-    "question": "¿Cómo compara el PER de SANTANDER con su beneficio neto reportado?"
+    "question": "Compara el beneficio neto de BBVA con su cotización actual"
   }'
 ```
 
-### `POST /api/v1/ingest` — Reindexa los PDFs
+### `POST /api/v1/ingest`
+
+Lanza la ingesta/indexación de PDFs.
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/ingest \
@@ -102,90 +138,103 @@ curl -X POST http://localhost:8080/api/v1/ingest \
   -d '{}'
 ```
 
-### `GET /health` — Estado del sistema
+Nota: la implementación actual ejecuta una nueva pasada de ingesta, pero no borra automáticamente la colección antes de insertar.
+
+### Health y métricas
 
 ```bash
 curl http://localhost:8080/health
+curl http://localhost:8080/health/live
+curl http://localhost:8080/health/ready
+curl http://localhost:8080/metrics
 ```
 
-```json
-{
-  "status": "healthy",
-  "vector_store": "healthy",
-  "redis": "healthy",
-  "ollama": "healthy",
-  "collection_count": 1240
-}
+## Operativa habitual
+
+```bash
+make
+make start
+make stop
+make restart
+make logs SVC=api
+make logs SVC=ollama
+make status
+make ingest
+make urls
 ```
+
+Comandos que conviene recordar:
+
+- `make` o `make start`: levanta el stack completo.
+- `make stop`: apaga el stack.
+- `make logs SVC=api`: sigue logs del servicio que te interese.
+- `make ingest`: lanza la ingesta manualmente.
 
 ## Desarrollo local
 
 ```bash
-# Instalar dependencias
 uv sync --dev
-
-# Crear .env para desarrollo local
 cp .env.example .env
-# Editar .env: cambiar hostnames de servicios a localhost
+```
 
-# Lanzar servicios de soporte (sin la API)
-docker compose up chroma redis mlflow postgres prometheus grafana -d
+Para ejecutar la API fuera de Docker, ajusta `.env` para apuntar a `localhost` en lugar de a nombres de servicio Docker, luego:
 
-# Arrancar la API localmente
+```bash
+docker compose up -d chroma redis ollama prometheus grafana loki tempo otel-collector alertmanager
 uv run uvicorn src.api.main:app --reload --port 8080
+```
 
-# Indexar PDFs
-uv run python scripts/ingest.py
+Comandos útiles:
 
-# Ejecutar tests
+```bash
 uv run pytest tests/ -v
-
-# Linting
-uv run ruff check src/ tests/
+uv run pytest tests/unit/ -v
+uv run pytest tests/integration/ -v
+uv run ruff check src/ tests/ scripts/
+uv run ruff format src/ tests/ scripts/
+uv run mypy src/
+make logs SVC=api
 ```
 
 ## Estructura del proyecto
 
-```
+```text
 src/
-├── config.py                 # Settings centralizados (pydantic-settings)
-├── logging_config.py         # Logging JSON estructurado (structlog)
-├── ingestion/
-│   ├── pdf_loader.py         # Carga PDFs con PyMuPDF, extrae metadata
-│   └── pipeline.py           # Orquesta ETL: load → chunk → embed → store
-├── vectorstore/
-│   └── store.py              # Abstracción ChromaDB + LlamaIndex
-├── rag/
-│   ├── engine.py             # Query engine: retrieval + generación
-│   └── prompts.py            # Templates de prompts en español/inglés
-├── agents/
-│   ├── tools.py              # Tools yfinance: precio, histórico, comparativa
-│   └── financial_agent.py    # ReAct agent: RAG + tools en tiempo real
-├── api/
-│   ├── main.py               # FastAPI app, middlewares, Prometheus
-│   ├── models.py             # Pydantic v2 request/response schemas
-│   ├── dependencies.py       # DI: singletons de RAG, Redis, agent
-│   ├── cache.py              # Redis cache con SHA-256 key
-│   ├── rate_limiter.py       # Sliding window rate limit por IP
-│   └── routes/
-│       ├── query.py          # POST /query y /agent
-│       ├── ingest.py         # POST /ingest
-│       └── health.py         # GET /health, /health/live, /health/ready
-└── monitoring/
-    └── metrics.py            # Counters, Histograms y Gauges de Prometheus
+  api/            FastAPI, rutas, dependencias, caché y rate limiting
+  agents/         agente financiero y herramientas de mercado
+  ingestion/      carga de PDFs y chunking
+  monitoring/     métricas Prometheus
+  rag/            motor RAG y prompts
+  vectorstore/    integración con ChromaDB
 
 infra/
-├── docker/Dockerfile         # Multi-stage build, usuario no-root
-├── prometheus/prometheus.yml # Configuración de scraping
-└── grafana/
-    ├── provisioning/         # Auto-provisioning de datasource y dashboards
-    └── dashboards/           # Dashboard JSON con métricas RAG
+  alertmanager/
+  docker/
+  grafana/
+  loki/
+  otel/
+  prometheus/
+  promtail/
+  tempo/
+
+frontend/
+  app.py          interfaz Chainlit
+
+docs/
+  documentación técnica y funcional
 ```
+
+## Documentación
+
+Toda la documentación, salvo este `README`, vive ahora en [docs](docs/):
+
+- [docs/infra.md](docs/infra.md)
+- [docs/RAG.md](docs/RAG.md)
+- [docs/observability.md](docs/observability.md)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [docs/DEVELOPER_MANUAL.md](docs/DEVELOPER_MANUAL.md)
+- [docs/USER_MANUAL.md](docs/USER_MANUAL.md)
 
 ## Empresas incluidas
 
-29 empresas del IBEX35: ACCIONA, ACERINOX, ACS, AENA, AMADEUS, ARCELORMITTAL, BBVA, CELLNEX, ENAGAS, ENDESA, FERROVIAL, FLUIDRA, GRIFOLS, IAG, IBERDROLA, INDITEX, INDRA, LOGISTA, MAPFRE, MERLINPROPERTIES, NATURGY, PUIG, REDEIA, ROVI, SACYR, SANTANDER, SOLARIA, TELEFONICA, UNICAJA.
-
-## Documentación técnica
-
-Ver [ARCHITECTURE.md](ARCHITECTURE.md) para una explicación detallada de cada componente, las decisiones de diseño y el flujo completo de una petición.
+ACCIONA, ACERINOX, ACS, AENA, AMADEUS, ARCELORMITTAL, BBVA, CELLNEX, ENAGAS, ENDESA, FERROVIAL, FLUIDRA, GRIFOLS, IAG, IBERDROLA, INDITEX, INDRA, LOGISTA, MAPFRE, MERLINPROPERTIES, NATURGY, PUIG, REDEIA, ROVI, SACYR, SANTANDER, SOLARIA, TELEFONICA y UNICAJA.

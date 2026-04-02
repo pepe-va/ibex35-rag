@@ -1,79 +1,85 @@
-.PHONY: help up down restart build logs shell chromadb \
-        pull-models models reindex \
-        frontend frontend-build frontend-logs frontend-shell \
-        test test-unit test-integration \
-        lint format typecheck \
-        clean clean-volumes \
-        status urls
+.PHONY: start stop restart logs status ingest urls smoke help
+.DEFAULT_GOAL := start
 
-# ── Config ────────────────────────────────────────────────────────────────────
-COMPOSE  := docker compose
-API      := $(COMPOSE) exec api
+COMPOSE := docker compose
+API := $(COMPOSE) exec -T api
+SVC ?= api
 
-# ── Default ───────────────────────────────────────────────────────────────────
 help:
 	@echo ""
-	@echo "  IBEX35 RAG — available targets"
+	@echo "IBEX35 RAG"
 	@echo ""
-	@echo "  Stack"
-	@echo "    make up              Start all services (detached)"
-	@echo "    make down            Stop all services"
-	@echo "    make restart         Restart the API container"
-	@echo "    make build           Rebuild Docker images"
-	@echo "    make logs            Follow API logs  (SVC=ollama make logs)"
-	@echo "    make shell           Open a shell inside the API container"
-	@echo "    make status          Show container status"
-	@echo "    make urls            Print service URLs"
-	@echo ""
-	@echo "  Frontend"
-	@echo "    make frontend        Restart Chainlit frontend"
-	@echo "    make frontend-build  Rebuild frontend image"
-	@echo "    make frontend-logs   Follow frontend logs"
-	@echo "    make frontend-shell  Shell inside frontend container"
-	@echo ""
-	@echo "  Data"
-	@echo "    make models        List models available in Ollama"
-	@echo "    make reindex       Wipe ChromaDB and re-ingest all PDFs"
-	@echo ""
-	@echo "  Quality"
-	@echo "    make test          Run full test suite"
-	@echo "    make test-unit     Run unit tests only"
-	@echo "    make test-int      Run integration tests only"
-	@echo "    make lint          Run ruff linter"
-	@echo "    make format        Auto-format with ruff"
-	@echo "    make typecheck     Run mypy"
-	@echo ""
-	@echo "  Cleanup"
-	@echo "    make clean         Remove __pycache__ and .pyc files"
-	@echo "    make clean-volumes WARNING: deletes all Docker volumes"
+	@echo "  make        Levanta el stack completo"
+	@echo "  make start  Levanta el stack completo"
+	@echo "  make stop   Para y elimina los contenedores"
+	@echo "  make restart Reinicia la API"
+	@echo "  make logs SVC=api"
+	@echo "  make status"
+	@echo "  make ingest"
+	@echo "  make urls"
+	@echo "  make smoke  Verifica que todo el stack funciona"
 	@echo ""
 
-# ── Stack ─────────────────────────────────────────────────────────────────────
-up:
-	$(COMPOSE) up -d
-	@$(COMPOSE) ps
+start:
+	@test -f .env || { echo "ERROR: .env no encontrado. Copia .env.example a .env"; exit 1; }
+	@docker info > /dev/null 2>&1 || { echo "ERROR: Docker no está corriendo"; exit 1; }
+	@echo "► Levantando stack..."
+	@$(COMPOSE) up -d
+	@echo "► Esperando servicios críticos..."
+	@for svc in ollama chroma redis; do \
+		printf "  %-10s " "$$svc"; \
+		for i in $$(seq 1 40); do \
+			status=$$($(COMPOSE) ps --format '{{.Health}}' $$svc 2>/dev/null | head -1); \
+			if [ "$$status" = "healthy" ]; then echo "healthy ✓"; break; fi; \
+			if [ "$$i" = "40" ]; then echo "no respondió a tiempo"; break; fi; \
+			printf "."; sleep 3; \
+		done; \
+	done
+	@echo "► Verificando modelos..."
+	@LLM=$$(grep '^OLLAMA_LLM_MODEL=' .env 2>/dev/null | cut -d= -f2-); \
+	EMB=$$(grep '^OLLAMA_EMBED_MODEL=' .env 2>/dev/null | cut -d= -f2-); \
+	LLM=$${LLM:-llama3.2:latest}; \
+	EMB=$${EMB:-nomic-embed-text:latest}; \
+	PRESENT=$$($(COMPOSE) exec -T ollama ollama list 2>/dev/null || true); \
+	echo "$$PRESENT" | grep -q "$${LLM%%:*}" \
+		&& echo "  $$LLM ya disponible ✓" \
+		|| { echo "  Descargando $$LLM..."; $(COMPOSE) exec -T ollama ollama pull $$LLM; }; \
+	echo "$$PRESENT" | grep -q "$${EMB%%:*}" \
+		&& echo "  $$EMB ya disponible ✓" \
+		|| { echo "  Descargando $$EMB..."; $(COMPOSE) exec -T ollama ollama pull $$EMB; }
+	@echo "► Verificando índice..."
+	@COLLECTION=$$(grep '^CHROMA_COLLECTION=' .env 2>/dev/null | cut -d= -f2-); \
+	COLLECTION=$${COLLECTION:-ibex35}; \
+	COUNT=$$($(COMPOSE) exec -T api python -c \
+		"import chromadb; c=chromadb.HttpClient(host='chroma', port=8000); print(c.get_or_create_collection('$$COLLECTION').count())" \
+		2>/dev/null || echo "0"); \
+	if [ "$${COUNT:-0}" -gt 0 ] 2>/dev/null; then \
+		echo "  $$COUNT chunks ya indexados ✓"; \
+	else \
+		echo "  Colección vacía; ejecutando ingest inicial..."; \
+		$(API) python scripts/ingest.py; \
+	fi
+	@echo ""
+	@echo "✓ Stack listo"
+	@$(MAKE) --no-print-directory urls
 
-down:
+stop:
 	$(COMPOSE) down
 
 restart:
 	$(COMPOSE) restart api
 
-build:
-	$(COMPOSE) build
-
-chromadb:
-	$(COMPOSE) up -d --force-recreate chroma
-
-SVC ?= api
 logs:
 	$(COMPOSE) logs -f $(SVC)
 
-shell:
-	$(API) /bin/bash
-
 status:
 	$(COMPOSE) ps
+
+ingest:
+	$(API) python scripts/ingest.py
+
+smoke:
+	@uv run python scripts/smoke_test.py
 
 urls:
 	@echo ""
@@ -81,64 +87,7 @@ urls:
 	@echo "  API        http://localhost:8080"
 	@echo "  API docs   http://localhost:8080/docs"
 	@echo "  ChromaDB   http://localhost:8000"
-	@echo "  MLflow     http://localhost:5000"
-	@echo "  Grafana    http://localhost:3000  (ver .env para credenciales)"
+	@echo "  Grafana    http://localhost:3000"
 	@echo "  Prometheus http://localhost:9090"
 	@echo "  Ollama     http://localhost:11434"
 	@echo ""
-
-# ── Frontend ──────────────────────────────────────────────────────────────────
-frontend:
-	$(COMPOSE) restart frontend
-
-frontend-build:
-	$(COMPOSE) build frontend
-
-frontend-logs:
-	$(COMPOSE) logs -f frontend
-
-frontend-shell:
-	$(COMPOSE) exec frontend /bin/bash
-
-# ── Data ──────────────────────────────────────────────────────────────────────
-pull-models:
-	$(COMPOSE) exec ollama ollama pull llama3.2:latest
-	$(COMPOSE) exec ollama ollama pull nomic-embed-text:latest
-
-models:
-	$(COMPOSE) exec ollama ollama list
-
-reindex:
-	@echo "Re-indexing: wiping ChromaDB and ingesting PDFs..."
-	$(API) python scripts/ingest.py
-	@echo "Done."
-
-# ── Quality ───────────────────────────────────────────────────────────────────
-test:
-	uv run pytest tests/ -v
-
-test-unit:
-	uv run pytest tests/unit/ -v
-
-test-int:
-	uv run pytest tests/integration/ -v
-
-lint:
-	uv run ruff check src/ tests/ scripts/
-
-format:
-	uv run ruff format src/ tests/ scripts/
-	uv run ruff check --fix src/ tests/ scripts/
-
-typecheck:
-	uv run mypy src/
-
-# ── Cleanup ───────────────────────────────────────────────────────────────────
-clean:
-	find . -type d -name __pycache__ -not -path './.venv/*' | xargs rm -rf
-	find . -name '*.pyc' -not -path './.venv/*' -delete
-
-clean-volumes:
-	@echo "WARNING: This will delete ALL Docker volumes (ChromaDB, Ollama models, MLflow data, etc.)"
-	@read -p "Are you sure? [y/N] " ans && [ "$$ans" = "y" ] || exit 0
-	$(COMPOSE) down -v

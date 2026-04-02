@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     ollama_llm_model: str = "llama3.2:latest"
     ollama_embed_model: str = "nomic-embed-text:latest"
     llm_temperature: float = 0.1
-    llm_request_timeout: float = 120.0
+    llm_request_timeout: float = 300.0
 
     # Vector store
     chroma_host: str = "localhost"
@@ -29,10 +29,6 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 3600
     rate_limit_requests: int = 20
     rate_limit_window_seconds: int = 60
-
-    # MLflow
-    mlflow_tracking_uri: str = "http://localhost:5000"
-    mlflow_experiment_name: str = "ibex35-rag"
 
     # Data
     pdf_dir: str = "./ibex35/Resultados financieros"

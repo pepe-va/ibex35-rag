@@ -8,6 +8,8 @@ services:
     ports:
       - "8080:8080"
     env_file: .env
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
     volumes:
       - ./ibex35/Resultados financieros:/app/data/pdfs:ro
     depends_on:
@@ -17,7 +19,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      mlflow:
+      otel-collector:
         condition: service_started
     restart: unless-stopped
     networks:
@@ -58,7 +60,7 @@ services:
       ANONYMIZED_TELEMETRY: "false"
       IS_PERSISTENT: "true"
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v2/heartbeat')"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8000 && echo -e 'GET /api/v2/heartbeat HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q 'heartbeat' <&3"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -77,50 +79,6 @@ services:
     command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - ibex35
-
-  # ── MLflow ────────────────────────────────────────────────────────────────────
-  mlflow:
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.mlflow
-    ports:
-      - "5000:5000"
-    env_file: .env
-    environment:
-      MLFLOW_BACKEND_STORE_URI: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      MLFLOW_DEFAULT_ARTIFACT_ROOT: /mlflow/artifacts
-    volumes:
-      - mlflow_artifacts:/mlflow/artifacts
-    command: >
-      mlflow server
-      --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      --default-artifact-root /mlflow/artifacts
-      --host 0.0.0.0
-      --port 5000
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - ibex35
-
-  # ── PostgreSQL (MLflow backend) ───────────────────────────────────────────────
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -150,11 +108,15 @@ services:
       - "9090:9090"
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/rules:/etc/prometheus/rules:ro
       - prometheus_data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
       - "--web.enable-lifecycle"
+      - "--web.enable-remote-write-receiver"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     networks:
       - ibex35
@@ -174,6 +136,125 @@ services:
       - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
+      - tempo
+      - loki
+    restart: unless-stopped
+    networks:
+      - ibex35
+
+  # ── OpenTelemetry Collector ───────────────────────────────────────────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.99.0
+    command: ["--config=/etc/otelcol-contrib/otel-collector.yml"]
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8888:8888"   # Prometheus metrics del collector
+    volumes:
+      - ./infra/otel:/etc/otelcol-contrib:ro
+    restart: unless-stopped
+    networks:
+      - ibex35
+
+  # ── Tempo (trazas distribuidas) ───────────────────────────────────────────────
+  tempo:
+    image: grafana/tempo:2.6.1
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    ports:
+      - "3200:3200"
+    volumes:
+      - ./infra/tempo:/etc/tempo:ro
+      - tempo_data:/var/tempo
+    restart: unless-stopped
+    networks:
+      - ibex35
+
+  # ── Loki (agregación de logs) ─────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:latest
+    command: ["-config.file=/etc/loki/loki.yml"]
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./infra/loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+    restart: unless-stopped
+    networks:
+      - ibex35
+
+  # ── Promtail (envía logs Docker → Loki) ──────────────────────────────────────
+  promtail:
+    image: grafana/promtail:latest
+    command: ["-config.file=/etc/promtail/promtail.yml"]
+    volumes:
+      - ./infra/promtail/promtail.yml:/etc/promtail/promtail.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - loki
+    restart: unless-stopped
+    networks:
+      - ibex35
+
+  # ── node_exporter (métricas del host) ────────────────────────────────────────
+  node-exporter:
+    image: prom/node-exporter:latest
+    pid: host
+    network_mode: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    restart: unless-stopped
+
+  # ── cAdvisor (métricas de contenedores) ──────────────────────────────────────
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    command:
+      - "--store_container_labels=false"
+      - "--whitelisted_container_labels=com.docker.compose.service"
+    ports:
+      - "8081:8080"   # 8080 ocupado por chroma
+    restart: unless-stopped
+    networks:
+      - ibex35
+
+  # ── Redis Exporter (métricas Redis → Prometheus) ─────────────────────────────
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    environment:
+      REDIS_ADDR: "redis://redis:6379"
+    ports:
+      - "9121:9121"
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - ibex35
+
+  # ── Alertmanager ─────────────────────────────────────────────────────────────
+  alertmanager:
+    image: prom/alertmanager:latest
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./infra/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
     restart: unless-stopped
     networks:
       - ibex35
@@ -182,10 +263,12 @@ volumes:
   ollama_data:
   chroma_data:
   redis_data:
-  mlflow_artifacts:
-  postgres_data:
   prometheus_data:
   grafana_data:
+  tempo_data:
+  loki_data:
+  alertmanager_data:
+
 
 networks:
   ibex35:

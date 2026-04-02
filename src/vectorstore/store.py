@@ -91,6 +91,23 @@ class VectorStoreManager:
         except Exception:
             return 0
 
+    def get_metadata_stats(self) -> dict:
+        """Return stats about indexed content: companies and pages."""
+        try:
+            results = self._get_collection().get(include=["metadatas"])
+            companies: set = set()
+            pages: set = set()
+            for m in results.get("metadatas") or []:
+                if m:
+                    companies.add(m.get("company"))
+                    pages.add((m.get("source"), m.get("page")))
+            return {
+                "companies": len(companies - {None}),
+                "pages": len(pages - {(None, None)}),
+            }
+        except Exception:
+            return {"companies": 0, "pages": 0}
+
     def health_check(self) -> bool:
         """Ping ChromaDB."""
         try:

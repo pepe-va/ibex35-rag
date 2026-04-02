@@ -18,8 +18,6 @@ def settings() -> Settings:
         chroma_port=8000,
         chroma_collection="test_ibex35",
         redis_url="redis://localhost:6379/0",
-        mlflow_tracking_uri="http://localhost:5000",
-        mlflow_experiment_name="test-ibex35-rag",
         pdf_dir="./ibex35/Resultados financieros",
         environment="test",
         rate_limit_requests=100,

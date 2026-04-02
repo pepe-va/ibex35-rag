@@ -1,10 +1,12 @@
-"""RAG query engine: retrieval + generation with MLflow tracking."""
+"""RAG query engine: retrieval + generation with RAGAS evaluation."""
 
+import threading
 import time
 from dataclasses import dataclass, field
 
-import mlflow
 from llama_index.core import VectorStoreIndex
+from llama_index.core.callbacks import CallbackManager, CBEventType
+from llama_index.core.callbacks.base_handler import BaseCallbackHandler
 from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core.response_synthesizers import get_response_synthesizer
 from llama_index.core.retrievers import VectorIndexRetriever
@@ -12,9 +14,46 @@ from llama_index.llms.ollama import Ollama
 
 from src.config import Settings
 from src.logging_config import get_logger
+from src.monitoring.metrics import (
+    CONTEXT_BYTES,
+    EMPTY_RETRIEVAL,
+    LLM_COMPLETION_TOKENS,
+    LLM_LOAD_DURATION,
+    LLM_PROMPT_TOKENS,
+    LLM_TOTAL_DURATION,
+    RETRIEVED_CHUNKS,
+    RETRIEVAL_SCORE,
+)
 from src.rag.prompts import QA_TEMPLATE, REFINE_TEMPLATE
 
 logger = get_logger(__name__)
+
+
+class _OllamaMetricsHandler(BaseCallbackHandler):
+    """Captures Ollama-specific fields from LLM responses and feeds Prometheus."""
+
+    def __init__(self) -> None:
+        super().__init__([], [])
+
+    def on_event_start(self, event_type, payload=None, event_id="", **kwargs) -> str:
+        return event_id
+
+    def on_event_end(self, event_type, payload=None, event_id="", **kwargs) -> None:
+        if event_type != CBEventType.LLM or not payload:
+            return
+        response = payload.get("response")
+        raw = getattr(response, "raw", None) or {}
+        if raw.get("prompt_eval_count"):
+            LLM_PROMPT_TOKENS.observe(raw["prompt_eval_count"])
+        if raw.get("eval_count"):
+            LLM_COMPLETION_TOKENS.observe(raw["eval_count"])
+        if raw.get("total_duration"):
+            LLM_TOTAL_DURATION.observe(raw["total_duration"] / 1e9)
+        if raw.get("load_duration"):
+            LLM_LOAD_DURATION.observe(raw["load_duration"] / 1e9)
+
+    def start_trace(self, trace_id=None) -> None: ...
+    def end_trace(self, trace_id=None, trace_map=None) -> None: ...
 
 
 @dataclass
@@ -37,17 +76,69 @@ class QueryResult:
         }
 
 
+def _run_ragas_evaluation(
+    question: str,
+    answer: str,
+    contexts: list[str],
+    settings: Settings,
+) -> None:
+    """Evaluate RAG response with RAGAS metrics (runs in background thread)."""
+    try:
+        from llama_index.embeddings.ollama import OllamaEmbedding
+        from ragas import EvaluationDataset, SingleTurnSample, evaluate
+        from ragas.embeddings import LlamaIndexEmbeddingsWrapper
+        from ragas.llms import LlamaIndexLLMWrapper
+        from ragas.metrics import AnswerRelevancy, Faithfulness
+
+        llm_wrapper = LlamaIndexLLMWrapper(
+            Ollama(
+                model=settings.ollama_llm_model,
+                base_url=settings.ollama_base_url,
+                temperature=0.0,
+            )
+        )
+        embed_wrapper = LlamaIndexEmbeddingsWrapper(
+            OllamaEmbedding(
+                model_name=settings.ollama_embed_model,
+                base_url=settings.ollama_base_url,
+            )
+        )
+
+        sample = SingleTurnSample(
+            user_input=question,
+            response=answer,
+            retrieved_contexts=contexts,
+        )
+        dataset = EvaluationDataset(samples=[sample])
+        result = evaluate(
+            dataset=dataset,
+            metrics=[Faithfulness(), AnswerRelevancy()],
+            llm=llm_wrapper,
+            embeddings=embed_wrapper,
+        )
+        row = result.to_pandas().iloc[0].to_dict()
+        logger.info(
+            "ragas_evaluation",
+            faithfulness=round(float(row.get("faithfulness") or 0), 3),
+            answer_relevancy=round(float(row.get("answer_relevancy") or 0), 3),
+        )
+    except Exception as exc:
+        logger.warning("ragas_evaluation_failed", error=str(exc))
+
+
 class RAGEngine:
-    """LlamaIndex-based RAG engine with MLflow instrumentation."""
+    """LlamaIndex-based RAG engine with RAGAS evaluation."""
 
     def __init__(self, settings: Settings, index: VectorStoreIndex) -> None:
         self.settings = settings
         self.index = index
+        self._cb = CallbackManager([_OllamaMetricsHandler()])
         self._llm = Ollama(
             model=settings.ollama_llm_model,
             base_url=settings.ollama_base_url,
             temperature=settings.llm_temperature,
             request_timeout=settings.llm_request_timeout,
+            callback_manager=self._cb,
         )
         self._query_engine = self._build_query_engine()
 
@@ -63,6 +154,9 @@ class RAGEngine:
             response_mode="compact",
             streaming=False,
         )
+        # get_response_synthesizer propagates Settings.callback_manager and overwrites
+        # the LLM's callback_manager — restore ours so _OllamaMetricsHandler fires.
+        self._llm.callback_manager = self._cb
         return RetrieverQueryEngine(
             retriever=retriever,
             response_synthesizer=synthesizer,
@@ -85,6 +179,7 @@ class RAGEngine:
             refine_template=REFINE_TEMPLATE,
             response_mode="compact",
         )
+        self._llm.callback_manager = self._cb
         return RetrieverQueryEngine(
             retriever=retriever,
             response_synthesizer=synthesizer,
@@ -103,51 +198,55 @@ class RAGEngine:
         return sources
 
     def query(self, question: str, company_filter: str | None = None) -> QueryResult:
-        """Execute a RAG query and log metrics to MLflow."""
+        """Execute a RAG query and trigger background RAGAS evaluation."""
         start = time.perf_counter()
 
-        mlflow.set_tracking_uri(self.settings.mlflow_tracking_uri)
-        mlflow.set_experiment(self.settings.mlflow_experiment_name)
+        try:
+            engine = (
+                self._build_query_engine_for_company(company_filter)
+                if company_filter
+                else self._query_engine
+            )
+            response = engine.query(question)
 
-        with mlflow.start_run(run_name="query", nested=True):
-            mlflow.set_tag("pipeline", "query")
-            mlflow.log_param("question_length", len(question))
-            mlflow.log_param("llm_model", self.settings.ollama_llm_model)
-            mlflow.log_param("similarity_top_k", self.settings.similarity_top_k)
-            if company_filter:
-                mlflow.log_param("company_filter", company_filter)
+            latency = time.perf_counter() - start
+            sources = self._extract_sources(response)
 
-            try:
-                engine = (
-                    self._build_query_engine_for_company(company_filter)
-                    if company_filter
-                    else self._query_engine
-                )
-                response = engine.query(question)
+            # Retrieval metrics
+            RETRIEVED_CHUNKS.observe(len(response.source_nodes))
+            if not response.source_nodes:
+                EMPTY_RETRIEVAL.inc()
+            else:
+                for node in response.source_nodes:
+                    if node.score is not None:
+                        RETRIEVAL_SCORE.observe(node.score)
 
-                latency = time.perf_counter() - start
-                sources = self._extract_sources(response)
+            ctx_bytes = sum(len(n.get_content().encode("utf-8")) for n in response.source_nodes)
+            CONTEXT_BYTES.observe(ctx_bytes)
 
-                mlflow.log_metric("latency_seconds", round(latency, 3))
-                mlflow.log_metric("num_sources", len(sources))
-                mlflow.log_metric("answer_length", len(str(response)))
+            logger.info(
+                "query_complete",
+                latency=round(latency, 3),
+                sources=len(sources),
+                company_filter=company_filter,
+            )
 
-                logger.info(
-                    "query_complete",
-                    latency=round(latency, 3),
-                    sources=len(sources),
-                    company_filter=company_filter,
-                )
+            # Fire-and-forget RAGAS evaluation in background
+            contexts = [node.get_content() for node in response.source_nodes]
+            threading.Thread(
+                target=_run_ragas_evaluation,
+                args=(question, str(response), contexts, self.settings),
+                daemon=True,
+            ).start()
 
-                return QueryResult(
-                    answer=str(response),
-                    sources=sources,
-                    latency_seconds=latency,
-                    num_retrieved=len(sources),
-                    query=question,
-                )
+            return QueryResult(
+                answer=str(response),
+                sources=sources,
+                latency_seconds=latency,
+                num_retrieved=len(sources),
+                query=question,
+            )
 
-            except Exception as exc:
-                mlflow.log_param("error", str(exc))
-                logger.exception("query_failed", error=str(exc))
-                raise
+        except Exception as exc:
+            logger.exception("query_failed", error=str(exc))
+            raise

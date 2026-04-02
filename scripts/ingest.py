@@ -42,7 +42,6 @@ def main() -> None:
     print(f"  Embed    : {settings.ollama_embed_model}")
     print(f"  Chunk    : {settings.chunk_size} tokens (overlap {settings.chunk_overlap})")
     print(f"  Chroma   : {settings.chroma_host}:{settings.chroma_port}/{settings.chroma_collection}")
-    print(f"  MLflow   : {settings.mlflow_tracking_uri}")
     print("=" * 60 + "\n")
 
     vs = VectorStoreManager(settings)

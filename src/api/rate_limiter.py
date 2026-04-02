@@ -22,7 +22,7 @@ async def check_rate_limit(
     now = time.time()
     window_start = now - settings.rate_limit_window_seconds
 
-    pipe = redis.pipeline()
+    pipe = await redis.pipeline()
     # Remove old entries outside the window
     pipe.zremrangebyscore(key, 0, window_start)
     # Count requests in the current window

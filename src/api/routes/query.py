@@ -1,5 +1,8 @@
 """Query endpoints: RAG and Agent."""
 
+import asyncio
+import time
+
 from fastapi import APIRouter, Depends, Request
 
 from src.api.cache import get_cached_response, set_cached_response
@@ -14,6 +17,7 @@ from src.api.rate_limiter import check_rate_limit
 from src.config import Settings
 from src.logging_config import get_logger
 from src.monitoring.metrics import (
+    AGENT_LATENCY,
     AGENT_REQUESTS,
     CACHE_HITS,
     CACHE_MISSES,
@@ -50,14 +54,17 @@ async def query_rag(
 
     CACHE_MISSES.inc()
 
-    # RAG query
+    # RAG query — runs sync LlamaIndex in a thread to avoid blocking the event loop
     rag_engine = get_rag_engine()
-    with QUERY_LATENCY.labels(company=body.company_filter or "all").time():
-        result = rag_engine.query(
-            question=body.question,
-            company_filter=body.company_filter,
-        )
-
+    start = time.perf_counter()
+    result = await asyncio.to_thread(
+        rag_engine.query,
+        body.question,
+        body.company_filter,
+    )
+    QUERY_LATENCY.labels(company=body.company_filter or "all").observe(
+        time.perf_counter() - start
+    )
     QUERY_REQUESTS.labels(company=body.company_filter or "all", cached="false").inc()
 
     response = QueryResponse(
@@ -98,7 +105,9 @@ async def query_agent(
     agent = get_financial_agent()
 
     AGENT_REQUESTS.inc()
-    result = agent.run(question=body.question)
+    start = time.perf_counter()
+    result = await asyncio.to_thread(agent.run, body.question)
+    AGENT_LATENCY.observe(time.perf_counter() - start)
 
     return AgentResponse(
         answer=result.answer,

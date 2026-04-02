@@ -19,11 +19,16 @@ dependencies = [
     # Redis
     "redis>=5.2.0",
     "hiredis>=3.1.0",
-    # MLflow
-    "mlflow>=2.19.0",
+    # RAGAS
+    "ragas>=0.2.0",
     # Monitoring
     "prometheus-fastapi-instrumentator>=7.0.0",
     "prometheus-client>=0.21.0",
+    "opentelemetry-sdk>=1.24.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.24.0",
+    "opentelemetry-instrumentation-fastapi>=0.45b0",
+    "opentelemetry-instrumentation-redis>=0.45b0",
+    "opentelemetry-instrumentation-httpx>=0.45b0",
     # Logging
     "structlog>=24.4.0",
     # Data
@@ -33,7 +38,6 @@ dependencies = [
     # PDF
     "pymupdf>=1.25.0",
     "chromadb>=0.6.0",
-    "psycopg2-binary>=2.9.11",
 ]
 
 [project.optional-dependencies]

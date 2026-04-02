@@ -3,7 +3,6 @@
 import time
 from dataclasses import dataclass, field
 
-import mlflow
 from llama_index.core.agent import ReActAgent
 from llama_index.core.tools import QueryEngineTool, ToolMetadata
 from llama_index.llms.ollama import Ollama
@@ -89,50 +88,37 @@ class FinancialAgent:
         )
 
     def run(self, question: str) -> AgentResult:
-        """Execute the agent and log to MLflow."""
+        """Execute the agent."""
         start = time.perf_counter()
 
-        mlflow.set_tracking_uri(self.settings.mlflow_tracking_uri)
-        mlflow.set_experiment(self.settings.mlflow_experiment_name)
+        try:
+            response = self._agent.chat(question)
+            latency = time.perf_counter() - start
 
-        with mlflow.start_run(run_name="agent", nested=True):
-            mlflow.set_tag("pipeline", "agent")
-            mlflow.log_param("question_length", len(question))
-            mlflow.log_param("model", self.settings.ollama_llm_model)
+            # Extract tools used from agent steps
+            tools_used: list[str] = []
+            steps = 0
+            if hasattr(response, "sources"):
+                for src in response.sources:
+                    if hasattr(src, "tool_name"):
+                        tools_used.append(src.tool_name)
+                        steps += 1
 
-            try:
-                response = self._agent.chat(question)
-                latency = time.perf_counter() - start
+            logger.info(
+                "agent_complete",
+                latency=round(latency, 3),
+                steps=steps,
+                tools=tools_used,
+            )
 
-                # Extract tools used from agent steps
-                tools_used: list[str] = []
-                steps = 0
-                if hasattr(response, "sources"):
-                    for src in response.sources:
-                        if hasattr(src, "tool_name"):
-                            tools_used.append(src.tool_name)
-                            steps += 1
+            return AgentResult(
+                answer=str(response),
+                latency_seconds=latency,
+                steps_taken=steps,
+                tools_used=tools_used,
+                query=question,
+            )
 
-                mlflow.log_metric("latency_seconds", round(latency, 3))
-                mlflow.log_metric("steps_taken", steps)
-                mlflow.log_param("tools_used", ",".join(tools_used) if tools_used else "none")
-
-                logger.info(
-                    "agent_complete",
-                    latency=round(latency, 3),
-                    steps=steps,
-                    tools=tools_used,
-                )
-
-                return AgentResult(
-                    answer=str(response),
-                    latency_seconds=latency,
-                    steps_taken=steps,
-                    tools_used=tools_used,
-                    query=question,
-                )
-
-            except Exception as exc:
-                mlflow.log_param("error", str(exc))
-                logger.exception("agent_failed", error=str(exc))
-                raise
+        except Exception as exc:
+            logger.exception("agent_failed", error=str(exc))
+            raise
