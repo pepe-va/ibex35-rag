@@ -48,8 +48,8 @@ setup_logging(settings.log_level)
 logger = get_logger(__name__)
 
 
-async def _refresh_redis_metrics() -> None:
-    """Background task: update Redis memory/cache gauges every 30 s."""
+async def _refresh_metrics() -> None:
+    """Background task: update Redis and vector store gauges every 30 s."""
     while True:
         await asyncio.sleep(30)
         try:
@@ -62,6 +62,11 @@ async def _refresh_redis_metrics() -> None:
             CACHE_EVICTIONS.set(stats.get("evicted_keys", 0))
             keys = await r.dbsize()
             CACHE_KEYS_CURRENT.set(keys)
+        except Exception:
+            pass
+        try:
+            vs = get_vector_store()
+            VECTOR_STORE_COUNT.set(vs.collection_count())
         except Exception:
             pass
 
@@ -86,7 +91,7 @@ async def lifespan(app: FastAPI):
         logger.info("metadata_stats_loaded", companies=stats["companies"], pages=stats["pages"])
     except Exception:
         pass
-    task = asyncio.create_task(_refresh_redis_metrics())
+    task = asyncio.create_task(_refresh_metrics())
     yield
     task.cancel()
     logger.info("app_stopping")
@@ -97,7 +102,7 @@ app = FastAPI(
     title="IBEX35 RAG API",
     description=(
         "Production-ready Retrieval-Augmented Generation system for IBEX35 financial reports. "
-        "Powered by LlamaIndex + Ollama + ChromaDB."
+        "Powered by LangChain + Ollama + Qdrant."
     ),
     version=settings.app_version,
     lifespan=lifespan,

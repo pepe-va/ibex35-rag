@@ -11,11 +11,13 @@ services:
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
     volumes:
-      - ./ibex35/Resultados financieros:/app/data/pdfs:ro
+      - ./ibex35:/app/data/pdfs:ro
+      - ./data/rag-data:/app/data/rag-data
+      - ./src:/app/src:ro
     depends_on:
       ollama:
         condition: service_healthy
-      chroma:
+      qdrant:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -49,18 +51,16 @@ services:
     networks:
       - ibex35
 
-  # ── ChromaDB ─────────────────────────────────────────────────────────────────
-  chroma:
-    image: chromadb/chroma:latest
+  # ── Qdrant ───────────────────────────────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:latest
     ports:
-      - "8000:8000"
+      - "6333:6333"
+      - "6334:6334"
     volumes:
-      - chroma_data:/chroma/chroma
-    environment:
-      ANONYMIZED_TELEMETRY: "false"
-      IS_PERSISTENT: "true"
+      - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8000 && echo -e 'GET /api/v2/heartbeat HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q 'heartbeat' <&3"]
+      test: ["CMD-SHELL", "timeout 2 bash -c 'cat < /dev/null > /dev/tcp/localhost/6333' && exit 0 || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -208,7 +208,10 @@ services:
     command:
       - "--path.procfs=/host/proc"
       - "--path.sysfs=/host/sys"
-      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+      - "--path.rootfs=/rootfs"
+      - "--no-collector.filesystem"
+      - "--no-collector.netstat"
+      - "--no-collector.softnet"
     restart: unless-stopped
 
   # ── cAdvisor (métricas de contenedores) ──────────────────────────────────────
@@ -226,7 +229,20 @@ services:
       - "--store_container_labels=false"
       - "--whitelisted_container_labels=com.docker.compose.service"
     ports:
-      - "8081:8080"   # 8080 ocupado por chroma
+      - "8081:8080"
+    restart: unless-stopped
+    networks:
+      - ibex35
+
+  # ── Redis Commander (UI web para Redis) ──────────────────────────────────────
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    environment:
+      REDIS_HOSTS: "local:redis:6379"
+    ports:
+      - "8082:8081"
+    depends_on:
+      - redis
     restart: unless-stopped
     networks:
       - ibex35
@@ -261,7 +277,7 @@ services:
 
 volumes:
   ollama_data:
-  chroma_data:
+  qdrant_data:
   redis_data:
   prometheus_data:
   grafana_data:

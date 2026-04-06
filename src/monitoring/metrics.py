@@ -172,3 +172,43 @@ INGESTION_LAST_DURATION = Gauge(
     "rag_ingestion_last_duration_seconds",
     "Duration in seconds of the last ingestion run",
 )
+
+# ── RAG eval metrics (4.2 Generation Quality) ────────────────────────────────
+
+EVAL_FAITHFULNESS = Histogram(
+    "rag_eval_faithfulness",
+    "RAGAS Faithfulness: % of answer claims supported by retrieved context (0–1)",
+    buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+)
+
+EVAL_ANSWER_RELEVANCY = Histogram(
+    "rag_eval_answer_relevancy",
+    "RAGAS Answer Relevancy: semantic pertinence of the answer to the question (0–1)",
+    buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+)
+
+EVAL_ABSTENTION = Counter(
+    "rag_eval_abstention_total",
+    "Queries where the LLM abstained (answered 'I don't know' / no data available)",
+)
+
+EVAL_CHUNK_UTILIZATION = Histogram(
+    "rag_eval_chunk_utilization_ratio",
+    "Fraction of retrieved chunks with positive reranker score (proxy for utilization)",
+    buckets=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+)
+
+EVAL_TOKEN_IOU = Histogram(
+    "rag_eval_token_iou",
+    "Token-wise overlap between query tokens and retrieved context tokens (0–1)",
+    buckets=(0.0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0),
+)
+
+# ── RAG eval metrics (4.4 Stage latency) ─────────────────────────────────────
+
+EVAL_STAGE_LATENCY = Histogram(
+    "rag_eval_stage_latency_seconds",
+    "Latency per RAG sub-stage",
+    labelnames=["stage"],
+    buckets=(0.05, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0),
+)

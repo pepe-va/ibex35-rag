@@ -20,9 +20,9 @@ class Settings(BaseSettings):
     llm_request_timeout: float = 300.0
 
     # Vector store
-    chroma_host: str = "localhost"
-    chroma_port: int = 8000
-    chroma_collection: str = "ibex35"
+    qdrant_host: str = "localhost"
+    qdrant_port: int = 6333
+    qdrant_collection: str = "ibex35"
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
@@ -31,9 +31,8 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = 60
 
     # Data
-    pdf_dir: str = "./ibex35/Resultados financieros"
-    chunk_size: int = 512
-    chunk_overlap: int = 64
+    pdf_dir: str = "./ibex35"
+    rag_data_dir: str = "./data/rag-data"
     top_k: int = 5
 
     # App

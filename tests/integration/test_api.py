@@ -240,8 +240,8 @@ def ingest_client():
 
         pipeline_mock = MagicMock()
         pipeline_mock.run.return_value = IngestionResult(
-            total_documents=10,
-            total_nodes=250,
+            total_pdfs=10,
+            total_ingested=250,
             total_companies=5,
             duration_seconds=12.5,
             companies=["BBVA", "SANTANDER", "IBERDROLA", "INDITEX", "TELEFONICA"],

@@ -3,9 +3,12 @@
 import time
 from dataclasses import dataclass, field
 
-from llama_index.core.agent import ReActAgent
-from llama_index.core.tools import QueryEngineTool, ToolMetadata
-from llama_index.llms.ollama import Ollama
+from langchain.agents import create_agent
+from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain_core.messages import HumanMessage
+from langchain_core.tools import StructuredTool
+from langchain_ollama import ChatOllama
+from langgraph.checkpoint.memory import MemorySaver
 
 from src.agents.tools import ALL_TOOLS
 from src.config import Settings
@@ -37,6 +40,7 @@ class AgentResult:
     steps_taken: int = 0
     tools_used: list[str] = field(default_factory=list)
     query: str = ""
+    thread_id: str = "default"
 
     def to_dict(self) -> dict:
         return {
@@ -49,74 +53,88 @@ class AgentResult:
 
 
 class FinancialAgent:
-    """ReAct agent with RAG knowledge base + real-time market tools."""
+    """Tool-calling agent with RAG knowledge base + real-time market tools.
+
+    Uses the new LangChain create_agent API (LangGraph-based) with:
+    - MemorySaver checkpointer for per-session conversation memory
+    - ModelCallLimitMiddleware to cap LLM calls per request
+    """
 
     def __init__(self, settings: Settings, rag_engine: RAGEngine) -> None:
         self.settings = settings
         self.rag_engine = rag_engine
         self._agent = self._build_agent()
 
-    def _build_agent(self) -> ReActAgent:
-        llm = Ollama(
+    def _build_agent(self):
+        llm = ChatOllama(
             model=self.settings.ollama_llm_model,
             base_url=self.settings.ollama_base_url,
             temperature=self.settings.llm_temperature,
-            request_timeout=self.settings.llm_request_timeout,
         )
 
-        # Wrap RAG engine as a LlamaIndex tool
-        rag_tool = QueryEngineTool(
-            query_engine=self.rag_engine._query_engine,
-            metadata=ToolMetadata(
-                name="ibex35_financial_reports",
-                description=(
-                    "Consulta resultados financieros oficiales de empresas del IBEX35: "
-                    "ingresos, EBITDA, beneficio neto, deuda, dividendos, guidance y estrategia. "
-                    "Usa esta herramienta para preguntas sobre fundamentales de negocio."
-                ),
+        # Wrap RAG engine as a LangChain tool
+        def _rag_query(question: str) -> str:
+            result = self.rag_engine.query(question)
+            return result.answer
+
+        rag_tool = StructuredTool.from_function(
+            func=_rag_query,
+            name="ibex35_financial_reports",
+            description=(
+                "Consulta resultados financieros oficiales de empresas del IBEX35: "
+                "ingresos, EBITDA, beneficio neto, deuda, dividendos, guidance y estrategia. "
+                "Usa esta herramienta para preguntas sobre fundamentales de negocio."
             ),
         )
 
         all_tools = [rag_tool, *ALL_TOOLS]
 
-        return ReActAgent.from_tools(
+        return create_agent(
+            model=llm,
             tools=all_tools,
-            llm=llm,
-            max_iterations=8,
-            verbose=False,
             system_prompt=AGENT_SYSTEM_PROMPT,
+            checkpointer=MemorySaver(),
+            middleware=[ModelCallLimitMiddleware(run_limit=8, exit_behavior="end")],
         )
 
-    def run(self, question: str) -> AgentResult:
-        """Execute the agent."""
+    def run(self, question: str, thread_id: str | None = None) -> AgentResult:
+        """Execute the agent with optional session memory via thread_id."""
         start = time.perf_counter()
+        tid = thread_id or "default"
+        config = {"configurable": {"thread_id": tid}}
 
         try:
-            response = self._agent.chat(question)
+            response = self._agent.invoke(
+                {"messages": [HumanMessage(content=question)]},
+                config=config,
+            )
             latency = time.perf_counter() - start
 
-            # Extract tools used from agent steps
+            # Extract last AI message as answer
+            messages = response.get("messages", [])
+            answer = ""
             tools_used: list[str] = []
-            steps = 0
-            if hasattr(response, "sources"):
-                for src in response.sources:
-                    if hasattr(src, "tool_name"):
-                        tools_used.append(src.tool_name)
-                        steps += 1
+            for msg in messages:
+                if hasattr(msg, "tool_calls") and msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        tools_used.append(tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", ""))
+                if hasattr(msg, "content") and not getattr(msg, "tool_calls", None):
+                    answer = msg.content if isinstance(msg.content, str) else str(msg.content)
 
             logger.info(
                 "agent_complete",
                 latency=round(latency, 3),
-                steps=steps,
                 tools=tools_used,
+                thread_id=tid,
             )
 
             return AgentResult(
-                answer=str(response),
+                answer=answer,
                 latency_seconds=latency,
-                steps_taken=steps,
-                tools_used=tools_used,
+                steps_taken=len([m for m in messages if hasattr(m, "tool_calls") and m.tool_calls]),
+                tools_used=list(dict.fromkeys(tools_used)),  # deduplicate preserving order
                 query=question,
+                thread_id=tid,
             )
 
         except Exception as exc:

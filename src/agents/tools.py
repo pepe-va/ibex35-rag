@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 
 import yfinance as yf
-from llama_index.core.tools import FunctionTool
+from langchain_core.tools import StructuredTool
 
 from src.ingestion.pdf_loader import COMPANY_TICKER_MAP
 from src.logging_config import get_logger
@@ -146,27 +146,27 @@ def compare_companies_price(companies: list[str], days: int = 30) -> str:
     return "\n".join([header, separator, *rows])
 
 
-# LlamaIndex FunctionTools
-stock_price_tool = FunctionTool.from_defaults(
-    fn=get_stock_price,
+# LangChain StructuredTools
+stock_price_tool = StructuredTool.from_function(
+    func=get_stock_price,
     name="get_stock_price",
     description="Get current stock price and basic market data for an IBEX35 company.",
 )
 
-price_history_tool = FunctionTool.from_defaults(
-    fn=get_price_history,
+price_history_tool = StructuredTool.from_function(
+    func=get_price_history,
     name="get_price_history",
     description="Get historical stock price evolution for an IBEX35 company over N days.",
 )
 
-list_companies_tool = FunctionTool.from_defaults(
-    fn=list_ibex35_companies,
+list_companies_tool = StructuredTool.from_function(
+    func=list_ibex35_companies,
     name="list_ibex35_companies",
     description="List all IBEX35 companies available in the system with their ticker symbols.",
 )
 
-compare_price_tool = FunctionTool.from_defaults(
-    fn=compare_companies_price,
+compare_price_tool = StructuredTool.from_function(
+    func=compare_companies_price,
     name="compare_companies_price",
     description="Compare stock price performance of multiple IBEX35 companies over a given period.",
 )

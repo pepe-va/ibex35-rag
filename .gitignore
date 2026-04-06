@@ -16,3 +16,7 @@ chroma_data/
 # Ignore .md, but not README.md
 *.md
 !README.md
+
+#Ignore folders
+M.Agent-Deep-RAG-main/
+data/

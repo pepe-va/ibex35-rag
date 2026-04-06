@@ -1,21 +1,20 @@
 """Prompt templates for the IBEX35 RAG system."""
 
-from llama_index.core import PromptTemplate
-
 SYSTEM_PROMPT = """\
 Eres un analista financiero experto especializado en empresas del IBEX35.
-Respondes preguntas sobre resultados financieros basándote ÚNICAMENTE en el contexto proporcionado.
+Respondes preguntas sobre resultados financieros basándote en el contexto proporcionado.
 
 Reglas:
-- Si la información no está en el contexto, di explícitamente que no dispones de ese dato.
-- Usa siempre cifras concretas cuando estén disponibles (revenue, EBITDA, beneficio neto, etc.).
-- Cita la empresa y la fuente cuando sea relevante.
+- Usa TODOS los datos financieros disponibles en el contexto para construir tu respuesta.
+- Si el contexto contiene datos parciales, úsalos y explica qué datos adicionales no están disponibles.
+- Prioriza cifras concretas: ingresos, EBITDA, beneficio neto, márgenes, deuda, dividendo.
+- Si el contexto cubre operaciones específicas (filiales, mercados geográficos), incorpóralas como parte del análisis.
+- Solo di que no dispones de un dato si realmente no aparece en ningún fragmento del contexto.
 - Responde en el mismo idioma que la pregunta (español o inglés).
-- Sé preciso y conciso. Usa listas cuando compares múltiples empresas.
+- Sé preciso y estructurado. Usa secciones o listas cuando sea útil.
 """
 
-QA_TEMPLATE = PromptTemplate(
-    """\
+QA_TEMPLATE = """\
 Contexto de informes financieros del IBEX35:
 ---------------------
 {context_str}
@@ -27,10 +26,8 @@ Si el contexto no contiene la información necesaria, indícalo explícitamente.
 Pregunta: {query_str}
 
 Respuesta:"""
-)
 
-REFINE_TEMPLATE = PromptTemplate(
-    """\
+REFINE_TEMPLATE = """\
 Tienes una respuesta inicial y contexto adicional. Mejora la respuesta si el nuevo contexto
 aporta información relevante. Si no aporta nada nuevo, devuelve la respuesta original.
 
@@ -44,10 +41,8 @@ Contexto adicional:
 Pregunta original: {query_str}
 
 Respuesta mejorada:"""
-)
 
-COMPARISON_TEMPLATE = PromptTemplate(
-    """\
+COMPARISON_TEMPLATE = """\
 Eres un analista financiero del IBEX35. Compara las siguientes empresas usando los datos del contexto.
 Presenta los resultados en formato tabla markdown cuando sea posible.
 
@@ -59,4 +54,3 @@ Contexto:
 Solicitud de comparación: {query_str}
 
 Análisis comparativo:"""
-)

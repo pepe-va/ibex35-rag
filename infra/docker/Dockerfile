@@ -27,14 +27,24 @@ COPY --from=builder /app/.venv /app/.venv
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 
-# Data directory (PDFs mounted as volume)
-RUN mkdir -p /app/data/pdfs && chown -R appuser:appuser /app
+# Data directory + writable cache for Docling/HuggingFace model downloads
+RUN mkdir -p /app/data/pdfs /app/.cache && chown -R appuser:appuser /app
 
 USER appuser
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    HF_HOME="/app/.cache/huggingface" \
+    TRANSFORMERS_CACHE="/app/.cache/huggingface" \
+    DOCLING_ARTIFACTS_PATH="/app/.cache/docling"
+
+# Pre-download models while internet is still accesible (before offline flags)
+RUN python -c "from fastembed import SparseTextEmbedding; list(SparseTextEmbedding(model_name='Qdrant/bm25').embed(['test']))"
+RUN python -c "from sentence_transformers import CrossEncoder; CrossEncoder('BAAI/bge-reranker-base')"
+
+ENV HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
 
 EXPOSE 8080
 

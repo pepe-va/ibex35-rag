@@ -24,8 +24,8 @@ async def trigger_ingestion(
     """
     Trigger PDF ingestion in the background.
 
-    Loads all PDFs from the configured directory, chunks them, computes embeddings
-    with Ollama, and stores vectors in ChromaDB.
+    Loads all PDFs from the configured directory, extracts them with Docling,
+    computes dense + sparse embeddings with Ollama/BM25, and stores vectors in Qdrant.
     """
     global _ingestion_running
     if _ingestion_running:
@@ -49,8 +49,8 @@ async def trigger_ingestion(
 
     return IngestionResponse(
         success=result.success,
-        total_documents=result.total_documents,
-        total_nodes=result.total_nodes,
+        total_documents=result.total_pdfs,
+        total_nodes=result.total_ingested,
         total_companies=result.total_companies,
         duration_seconds=round(result.duration_seconds, 2),
         companies=result.companies,

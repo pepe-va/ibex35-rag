@@ -24,7 +24,7 @@ def get_rag_engine():
     from src.rag.engine import RAGEngine
     settings = get_settings()
     vs = get_vector_store()
-    return RAGEngine(settings=settings, index=vs.get_index())
+    return RAGEngine(settings=settings, vector_store=vs)
 
 
 @lru_cache

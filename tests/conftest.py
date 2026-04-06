@@ -18,7 +18,7 @@ def settings() -> Settings:
         chroma_port=8000,
         chroma_collection="test_ibex35",
         redis_url="redis://localhost:6379/0",
-        pdf_dir="./ibex35/Resultados financieros",
+        pdf_dir="./ibex35",
         environment="test",
         rate_limit_requests=100,
     )

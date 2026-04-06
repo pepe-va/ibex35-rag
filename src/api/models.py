@@ -13,6 +13,10 @@ class QueryRequest(BaseModel):
         default=False,
         description="Use the ReAct agent (combines RAG + real-time data). Slower but more capable.",
     )
+    thread_id: str | None = Field(
+        default=None,
+        description="Session ID for agent conversation memory. Same thread_id resumes the conversation.",
+    )
 
 
 class SourceDoc(BaseModel):
@@ -35,6 +39,19 @@ class AgentResponse(BaseModel):
     steps_taken: int
     tools_used: list[str]
     query: str
+
+
+class AskResponse(BaseModel):
+    answer: str
+    route: str  # "rag" | "agent"
+    latency_seconds: float
+    query: str
+    # RAG-specific (optional)
+    sources: list[SourceDoc] = Field(default_factory=list)
+    from_cache: bool = False
+    # Agent-specific (optional)
+    tools_used: list[str] = Field(default_factory=list)
+    steps_taken: int = 0
 
 
 class IngestionRequest(BaseModel):

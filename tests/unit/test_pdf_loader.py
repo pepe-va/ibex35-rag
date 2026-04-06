@@ -32,17 +32,14 @@ def test_load_all_pdfs_empty_dir(tmp_path):
         load_all_pdfs(tmp_path)
 
 
-@patch("src.ingestion.pdf_loader.fitz.open")
-def test_load_pdf_as_documents(mock_fitz, tmp_path):
+@patch("src.ingestion.pdf_loader.DocumentConverter")
+def test_load_pdf_as_documents(mock_converter_cls, tmp_path):
     """Should return one Document per non-empty page."""
-    mock_page = MagicMock()
-    mock_page.get_text.return_value = "Revenue: €10B EBITDA: €3B"
-    mock_doc = MagicMock()
-    mock_doc.__iter__ = MagicMock(return_value=iter([mock_page, mock_page]))
-    mock_doc.__len__ = MagicMock(return_value=2)
-    mock_doc.__enter__ = MagicMock(return_value=mock_doc)
-    mock_doc.__exit__ = MagicMock(return_value=False)
-    mock_fitz.return_value = mock_doc
+    mock_result = MagicMock()
+    mock_result.document.export_to_markdown.return_value = (
+        "Revenue: €10B EBITDA: €3B\n<!-- page break -->\nNet profit: €500M"
+    )
+    mock_converter_cls.return_value.convert.return_value = mock_result
 
     pdf_path = tmp_path / "IBERDROLA.pdf"
     pdf_path.touch()
@@ -53,22 +50,17 @@ def test_load_pdf_as_documents(mock_fitz, tmp_path):
     assert docs[0].metadata["company"] == "IBERDROLA"
     assert docs[0].metadata["ticker"] == "IBE.MC"
     assert docs[0].metadata["doc_type"] == "financial_results"
+    assert docs[0].metadata["content_type"] == "text"
 
 
-@patch("src.ingestion.pdf_loader.fitz.open")
-def test_load_pdf_skips_empty_pages(mock_fitz, tmp_path):
+@patch("src.ingestion.pdf_loader.DocumentConverter")
+def test_load_pdf_skips_empty_pages(mock_converter_cls, tmp_path):
     """Pages with only whitespace should be skipped."""
-    mock_page_empty = MagicMock()
-    mock_page_empty.get_text.return_value = "   \n  "
-    mock_page_content = MagicMock()
-    mock_page_content.get_text.return_value = "Net profit: €500M"
-
-    mock_doc = MagicMock()
-    mock_doc.__iter__ = MagicMock(return_value=iter([mock_page_empty, mock_page_content]))
-    mock_doc.__len__ = MagicMock(return_value=2)
-    mock_doc.__enter__ = MagicMock(return_value=mock_doc)
-    mock_doc.__exit__ = MagicMock(return_value=False)
-    mock_fitz.return_value = mock_doc
+    mock_result = MagicMock()
+    mock_result.document.export_to_markdown.return_value = (
+        "   \n  \n<!-- page break -->\nNet profit: €500M"
+    )
+    mock_converter_cls.return_value.convert.return_value = mock_result
 
     pdf_path = tmp_path / "SANTANDER.pdf"
     pdf_path.touch()

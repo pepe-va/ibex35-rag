@@ -43,7 +43,7 @@ def setup_logging(log_level: str = "INFO") -> None:
     root_logger.setLevel(log_level_num)
 
     # Silence noisy libraries
-    for lib in ("httpx", "httpcore", "chromadb", "urllib3"):
+    for lib in ("httpx", "httpcore", "qdrant_client", "urllib3"):
         logging.getLogger(lib).setLevel(logging.WARNING)
 
 

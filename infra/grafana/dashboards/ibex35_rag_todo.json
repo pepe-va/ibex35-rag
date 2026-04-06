@@ -1,7 +1,7 @@
 {
   "uid": "ibex35-todo-en-uno",
   "title": "IBEX35 RAG",
-  "description": "Panel de control unificado — API, RAG, Cache, Docker, Host, Trazas",
+  "description": "Panel de control unificado \u2014 API, RAG, Cache, Docker, Host, Trazas",
   "schemaVersion": 39,
   "version": 4,
   "refresh": "30s",
@@ -299,7 +299,7 @@
       },
       "targets": [
         {
-          "expr": "count(container_last_seen{id=~\"/docker/.*\"})",
+          "expr": "count(container_last_seen{id=~\"/docker/.*\", id!~\".*buildkit.*\"})",
           "legendFormat": ""
         }
       ],
@@ -827,7 +827,7 @@
     },
     {
       "id": 20,
-      "title": "RAG — Indexacion y Consultas",
+      "title": "RAG \u2014 Indexacion y Consultas",
       "type": "row",
       "gridPos": {
         "h": 1,
@@ -1332,7 +1332,7 @@
     },
     {
       "id": 29,
-      "title": "Chunking — duracion y tamano de chunk",
+      "title": "Chunking \u2014 duracion y tamano de chunk",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -1404,7 +1404,7 @@
     },
     {
       "id": 30,
-      "title": "Cache — Redis",
+      "title": "Cache \u2014 Redis",
       "type": "row",
       "gridPos": {
         "h": 1,
@@ -1746,7 +1746,7 @@
     },
     {
       "id": 40,
-      "title": "Docker — Contenedores",
+      "title": "Docker \u2014 Contenedores",
       "type": "row",
       "gridPos": {
         "h": 1,
@@ -1759,7 +1759,7 @@
     },
     {
       "id": 41,
-      "title": "Contenedores Docker — actividad de logs",
+      "title": "Contenedores Docker \u2014 actividad de logs",
       "type": "table",
       "gridPos": {
         "h": 8,
@@ -2262,7 +2262,7 @@
     },
     {
       "id": 50,
-      "title": "Host — Infraestructura",
+      "title": "Host \u2014 Infraestructura",
       "type": "row",
       "gridPos": {
         "h": 1,
@@ -2740,7 +2740,7 @@
     },
     {
       "id": 61,
-      "title": "Logs de la API — todos los niveles",
+      "title": "Logs de la API \u2014 todos los niveles",
       "type": "logs",
       "gridPos": {
         "h": 12,
@@ -2770,7 +2770,7 @@
     },
     {
       "id": 62,
-      "title": "Logs de errores — nivel error / exception",
+      "title": "Logs de errores \u2014 nivel error / exception",
       "type": "logs",
       "gridPos": {
         "h": 12,
@@ -2847,8 +2847,7 @@
           "queryType": "nativeSearch",
           "serviceName": "ibex35-rag-api",
           "limit": 20,
-          "refId": "A",
-          "expr": ""
+          "refId": "A"
         }
       ],
       "options": {}
@@ -2891,6 +2890,61 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 5
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 66,
+      "type": "timeseries",
+      "title": "Duraci\u00f3n de scrape por target",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 278,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "scrape_duration_seconds",
+          "legendFormat": "{{job}}",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": false
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
           }
         },
         "overrides": []
