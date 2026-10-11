@@ -1,0 +1,108 @@
+groups:
+  - name: rag_api
+    interval: 30s
+    rules:
+      - alert: RAGAPIDown
+        expr: up{job="ibex35-rag-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          description: "La API no responde. Revisa el contenedor con: docker compose logs api"
+        annotations:
+          summary: "RAG API caída"
+          description: "La API no responde. Revisa el contenedor con: docker compose logs api"
+
+      - alert: RAGAPIHighLatency
+        expr: histogram_quantile(0.95, rate(rag_query_latency_seconds_bucket[5m])) > 20
+        for: 5m
+        labels:
+          severity: warning
+          description: "Latencia P95 > 20s en consultas RAG. Puede que el LLM esté saturado."
+        annotations:
+          summary: "Latencia RAG P95 > 20s"
+          description: "Latencia P95 > 20s en consultas RAG. Puede que el LLM esté saturado."
+
+      - alert: RAGCacheHitRateLow
+        expr: |
+          rate(rag_cache_hits_total[10m]) /
+          (rate(rag_cache_hits_total[10m]) + rate(rag_cache_misses_total[10m]) + 0.001) < 0.1
+        for: 10m
+        labels:
+          severity: warning
+          description: "Cache hit rate < 10%. Pocas consultas repetidas o TTL muy bajo."
+        annotations:
+          summary: "Cache hit rate < 10%"
+          description: "Cache hit rate < 10%. Pocas consultas repetidas o TTL muy bajo."
+
+      - alert: IngestionFailed
+        expr: increase(rag_ingestion_runs_total{status="error"}[1h]) > 0
+        labels:
+          severity: critical
+          description: "El pipeline de ingesta ha fallado. Revisa los logs: docker compose logs api | grep ingestion"
+        annotations:
+          summary: "Ingesta de datos fallida"
+          description: "El pipeline de ingesta ha fallado. Revisa los logs: docker compose logs api | grep ingestion"
+
+      - alert: VectorStoreEmpty
+        expr: rag_vector_store_documents_current == 0
+        for: 5m
+        labels:
+          severity: critical
+          description: "ChromaDB no tiene documentos indexados. Ejecuta: make ingest"
+        annotations:
+          summary: "Vector store vacío"
+          description: "ChromaDB no tiene documentos indexados. Ejecuta: make ingest"
+
+      - alert: RAGEmptyRetrievalHigh
+        expr: |
+          rate(rag_empty_retrieval_total[10m]) /
+          (rate(rag_query_requests_total[10m]) + 0.001) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          description: "Más del 20% de consultas no encuentran chunks relevantes. Revisa el vector store o los embeddings."
+        annotations:
+          summary: "Retrieval vacío > 20%"
+          description: "Más del 20% de consultas no encuentran chunks relevantes."
+
+  - name: infrastructure
+    rules:
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+          description: "RAM del host > 90%. Considera cerrar aplicaciones o aumentar swap."
+        annotations:
+          summary: "Memoria del host > 90%"
+          description: "RAM del host > 90%. Considera cerrar aplicaciones o aumentar swap."
+
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 10m
+        labels:
+          severity: warning
+          description: "CPU del host > 85% durante más de 10 minutos."
+        annotations:
+          summary: "CPU del host > 85%"
+          description: "CPU del host > 85% durante más de 10 minutos."
+
+      - alert: NodeExporterDown
+        expr: up{job="node-exporter"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          description: "node-exporter caído. Sin métricas del host."
+        annotations:
+          summary: "Node Exporter caído"
+          description: "node-exporter caído. Sin métricas del host."
+
+      - alert: RedisDown
+        expr: up{job="redis-exporter"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          description: "Redis no responde. Se perderá caché y rate limiting."
+        annotations:
+          summary: "Redis caído"
+          description: "Redis no responde. Se perderá caché y rate limiting."

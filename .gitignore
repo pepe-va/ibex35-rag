@@ -1,0 +1,26 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+*.egg-info/
+mlruns/
+mlflow_artifacts/
+chroma_data/
+*.Zone.Identifier
+.claude/
+
+# Ignore .md, but not the project documentation
+*.md
+!README.md
+!CONTRIBUTING.md
+!docs/
+!docs/**/*.md
+
+#Ignore folders
+data/
+reports/

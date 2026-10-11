@@ -1,0 +1,119 @@
+[project]
+name = "ibex35-rag"
+version = "0.1.0"
+description = "Production-ready RAG system for IBEX35 financial reports"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # Agent framework (used directly)
+    "langchain>=0.3.0",
+    "langgraph>=0.2.0",
+    "langchain-text-splitters>=0.3.0",
+
+    # RAG — LangChain (vector store + retrieval + LLM + agent)
+    "langchain-qdrant>=0.2.0",
+    "langchain-ollama>=0.2.0",
+    "langchain-community>=0.3.0",
+    "langchain-core>=0.3.0",
+
+    # API
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+
+    # Redis
+    "redis>=5.2.0",
+    "hiredis>=3.1.0",
+
+    # RAGAS
+    "ragas>=0.2.0",
+
+    # Monitoring
+    "prometheus-fastapi-instrumentator>=7.0.0",
+    "prometheus-client>=0.21.0",
+    "opentelemetry-sdk>=1.24.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.24.0",
+    "opentelemetry-instrumentation-fastapi>=0.45b0",
+    "opentelemetry-instrumentation-redis>=0.45b0",
+    "opentelemetry-instrumentation-httpx>=0.45b0",
+
+    # Logging
+    "structlog>=24.4.0",
+
+    # Data
+    "yfinance>=0.2.50",
+    "httpx>=0.28.0",
+
+    # LangSmith (tracing + LLM metrics collector)
+    "langsmith>=0.2.0",
+
+    # PDF
+    "docling>=2.0.0",
+    
+    # Vector store + sparse search + reranking
+    "qdrant-client>=1.9.0",
+    "fastembed>=0.4.0",
+    "sentence-transformers>=3.0.0",
+]
+
+[project.optional-dependencies]
+frontend = [
+    "chainlit>=2.0.0",
+]
+
+[project.scripts]
+ingest = "src.ingestion.run_ingestion:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# The rule set enforces the Zen of Python (`python -c "import this"`).
+# See CONTRIBUTING.md#code-style for how each rule maps to an aphorism.
+select = [
+    "E", "W",  # pycodestyle      — Readability counts.
+    "F",       # pyflakes         — no unused imports or variables.
+    "I",       # isort            — one obvious import order.
+    "UP",      # pyupgrade        — one obvious (modern) way to do it.
+    "N",       # pep8-naming      — Readability counts.
+    "B",       # flake8-bugbear   — Errors should never pass silently.
+    "S110",    # try-except-pass  — Errors should never pass silently.
+    "SIM",     # flake8-simplify  — Simple is better than complex.
+    "C4",      # comprehensions   — Beautiful is better than ugly.
+    "RET",     # flake8-return    — Flat is better than nested.
+    "PIE",     # flake8-pie       — no redundant code.
+    "PERF",    # perflint         — the obvious way is also the fast one.
+    "ERA",     # eradicate        — no commented-out code.
+    "C90",     # mccabe           — If the implementation is hard to explain, it's a bad idea.
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[dependency-groups]
+dev = [
+    "fakeredis>=2.26.0",
+    "mypy>=1.14.0",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.9.0",
+]
