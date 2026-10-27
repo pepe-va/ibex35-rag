@@ -18,6 +18,7 @@ Detailed documentation for IBEX35 RAG. For installation and a quickstart, see th
 | Call the API from a client | [api.md](api.md) |
 | Change models, limits or paths | [configuration.md](configuration.md) |
 | Monitor the system or debug a slow or wrong answer | [observability.md](observability.md) |
+| See how the chunks are distributed in the vector space | [qdrant-visualize.md](qdrant-visualize.md) |
 | Contribute code | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 
 ## Documents
@@ -29,6 +30,7 @@ Detailed documentation for IBEX35 RAG. For installation and a quickstart, see th
 | [api.md](api.md) | Endpoints, request body, SSE events, ingestion, health checks, caching, rate limiting, errors |
 | [configuration.md](configuration.md) | Every environment variable grouped by area, plus engine constants |
 | [observability.md](observability.md) | Grafana dashboards, metrics catalogue, logs, traces, alert rules, example PromQL and LogQL queries |
+| [qdrant-visualize.md](qdrant-visualize.md) | Qdrant dashboard queries that explain the point distribution: by company, sector, content type, period, topic, language, and metadata quality checks |
 
 ## Topic index
 
@@ -51,4 +53,5 @@ Detailed documentation for IBEX35 RAG. For installation and a quickstart, see th
 | Reranking | [rag-pipeline.md → Reranking](rag-pipeline.md#4-reranking) |
 | Streaming (SSE) | [api.md → POST /api/v1/ask/stream](api.md#post-apiv1askstream) |
 | Traces | [observability.md → Traces](observability.md#traces) |
+| Vector space visualization | [qdrant-visualize.md](qdrant-visualize.md) |
 | Tuning retrieval | [rag-pipeline.md → Tuning reference](rag-pipeline.md#tuning-reference) |

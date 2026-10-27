@@ -141,7 +141,7 @@ A good pull request:
 2. Add a regex to `_COMPANY_PATTERNS` in `src/rag/retrieval.py`, including common aliases. Put specific patterns before generic ones to avoid false positives with short aliases.
 3. Add it to `COMPANIES` in `frontend/app.py` so it appears in the chat filter (the frontend ships in its own image and cannot import `src`).
 4. Add a unit test in `tests/unit/rag/test_retrieval.py` checking that `extract_companies` detects the name and its aliases.
-5. Drop the PDF into `data/raw/pdfs/` as `<COMPANY>.pdf` and run `make ingest`.
+5. Add a row to `src/ingestion/report_sources.csv` with its latest report so `make fetch` downloads it, or drop the PDF into `data/raw/pdfs/` as `<COMPANY>.pdf`, and run `make ingest`.
 6. Update the company list in `README.md`.
 
 ### Adding an agent tool

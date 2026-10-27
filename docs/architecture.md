@@ -199,6 +199,8 @@ src/
     config.py          Settings (pydantic-settings)
     logging.py         structlog JSON logging
   ingestion/
+    fetch_reports.py   downloads and verifies the latest reports (make fetch)
+    report_sources.csv one row per company: latest report URL, period, aliases
     metadata.py        company → ticker map, page-break marker, filename/content metadata
     pdf_loader.py      Docling conversion, tables, images (imports Docling)
     pipeline.py        two-phase IngestionPipeline

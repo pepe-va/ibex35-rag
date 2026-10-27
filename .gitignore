@@ -24,3 +24,22 @@ chroma_data/
 #Ignore folders
 data/
 reports/
+# Local / editor
+.idea/
+.vscode/
+.mcp.json
+.env.*
+!.env.example
+
+# Home-directory dotfiles that leak into the repo
+/.bash_profile
+/.bashrc
+/.gitconfig
+/.profile
+/.zprofile
+/.zshrc
+/.ripgreprc
+
+# One-off report downloads and PDFs
+IBEX35_ultimos_resultados_*/
+*.pdf

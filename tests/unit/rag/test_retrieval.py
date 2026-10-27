@@ -8,6 +8,16 @@ def test_extract_companies_preserves_query_order():
     assert companies == ["MERLINPROPERTIES", "BBVA"]
 
 
+def test_extract_companies_tells_acciona_energia_from_acciona():
+    assert extract_companies("¿Cuánto ganó Acciona Energía?") == ["ACCIONAENERGIA"]
+    assert extract_companies("Compara Acciona con Acciona Energía") == ["ACCIONA", "ACCIONAENERGIA"]
+
+
+def test_extract_companies_detects_banks_and_colonial():
+    companies = extract_companies("Sabadell, Bankinter, Caixabank y Colonial en 2026")
+    assert companies == ["SABADELL", "BANKINTER", "CAIXABANK", "COLONIAL"]
+
+
 def test_extract_filters_supports_multi_company_and_year():
     filters = extract_filters(
         "Compara el margen EBITDA y los ingresos de PUIG frente a ENAGAS en 2024."

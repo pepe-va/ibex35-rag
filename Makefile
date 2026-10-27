@@ -4,7 +4,10 @@
 .DEFAULT_GOAL := start
 SHELL         := /bin/bash
 
-COMPOSE := docker compose
+# GPU=1 reserves an NVIDIA GPU for api and ollama; by default only when Docker has the
+# NVIDIA runtime (nvidia-container-toolkit). Force it with: make start GPU=1
+GPU     ?= $(shell docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q nvidia && echo 1 || echo 0)
+COMPOSE := docker compose -f docker-compose.yml $(if $(filter 1,$(GPU)),,-f docker-compose.cpu.yml)
 OLLAMA  := $(COMPOSE) exec -T ollama ollama
 API     := $(COMPOSE) exec -T api
 CORE    := ollama qdrant redis api
@@ -19,11 +22,15 @@ ROUTER_MODEL := $(call env,OLLAMA_ROUTER_MODEL,qwen2.5:1.5b)
 COLLECTION   := $(call env,QDRANT_COLLECTION,ibex35)
 
 # The ingestion scripts run on the host against the Dockerized Ollama and Qdrant
-LOCAL := OLLAMA_BASE_URL=http://localhost:11434 QDRANT_HOST=localhost uv run
+# Host paths override the container ones (/app/...) that .env may carry
+LOCAL := OLLAMA_BASE_URL=http://localhost:11434 QDRANT_HOST=localhost \
+         PDF_DIR=./data/raw/pdfs RAG_DATA_DIR=./data/processed/rag_data uv run
 PDFS  := ./data/raw/pdfs
+# Touched after every ingestion: a PDF newer than it has not been ingested yet
+INGESTED := ./data/processed/.ingested
 
 .PHONY: help start up stop restart build logs status preflight models verify seed \
-        extract ingest test test-unit test-integration smoke metrics-check agent_test \
+        fetch extract ingest test test-unit test-integration smoke metrics-check agent_test \
         lint fmt langsmith-check urls
 
 ##@ Stack
@@ -34,7 +41,8 @@ help: ## Show this help
 		/^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@echo ""
 
-start: preflight up models verify seed ## Start everything: stack, models and initial ingestion
+# fetch runs before up: if Docker created data/ first it would be owned by root
+start: preflight fetch up models verify seed ## Start everything: latest reports, stack, models and ingestion
 	@echo -e "\n✓ Stack ready"
 	@$(MAKE) --no-print-directory langsmith-check urls
 
@@ -61,6 +69,7 @@ status: ## Container status
 preflight:
 	@test -f .env || { echo "✗ .env is missing — run: cp .env.example .env"; exit 1; }
 	@docker info >/dev/null 2>&1 || { echo "✗ Docker is not running"; exit 1; }
+	@[ "$(GPU)" = 1 ] || echo "~ No NVIDIA runtime in Docker: running on CPU (slower). See README → Prerequisites."
 
 models: ## Pull the Ollama models that are missing
 	@echo "► Ollama models..."
@@ -86,16 +95,24 @@ seed:
 	@echo "► Qdrant collection '$(COLLECTION)'..."
 	@n=$$(curl -sf http://localhost:6333/collections/$(COLLECTION) \
 		| python3 -c "import sys, json; print(json.load(sys.stdin)['result']['points_count'] or 0)" 2>/dev/null); \
-	if [ "$${n:-0}" -gt 0 ]; then echo "  $$n vectors indexed ✓"; \
-	else echo "  Empty collection, ingesting..."; $(MAKE) --no-print-directory ingest; fi
+	if [ "$${n:-0}" -eq 0 ]; then echo "  Empty collection, ingesting..."; \
+		$(MAKE) --no-print-directory ingest; \
+	elif [ ! -f $(INGESTED) ] || [ -n "$$(find $(PDFS) -maxdepth 1 -name '*.pdf' -newer $(INGESTED))" ]; then \
+		echo "  $$n vectors indexed, new reports found, ingesting..."; \
+		$(MAKE) --no-print-directory ingest; \
+	else echo "  $$n vectors indexed ✓"; fi
 
 ##@ Data
+
+fetch: ## Download and verify the latest results report of each IBEX35 company
+	@$(LOCAL) python src/ingestion/fetch_reports.py --pdf-dir $(PDFS)
 
 extract: ## Phase 1: PDFs → Markdown with Docling
 	$(LOCAL) python src/ingestion/preprocessor.py --pdf-dir $(PDFS)
 
 ingest: ## Full pipeline: extraction + indexing in Qdrant
 	$(LOCAL) python src/ingestion/run_ingestion.py --pdf-dir $(PDFS)
+	@touch $(INGESTED)
 
 ##@ Quality
 

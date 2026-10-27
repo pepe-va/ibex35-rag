@@ -136,7 +136,7 @@ See [docs/architecture.md](docs/architecture.md) for the component diagram and r
 
 - Docker with Docker Compose v2.
 - [`uv`](https://docs.astral.sh/uv/) and Python 3.11 on the host (used by `make start` for the initial ingestion and by the test/ingestion commands).
-- An NVIDIA GPU with [`nvidia-container-toolkit`](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/) is assumed by `docker-compose.yml` (the `api` and `ollama` services reserve one GPU). To run on CPU only, remove the `deploy.resources` blocks from those two services; expect much slower answers.
+- Ideally an NVIDIA GPU with [`nvidia-container-toolkit`](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) (also inside WSL2 with Docker Engine; Docker Desktop brings its own GPU support). When Docker has the NVIDIA runtime, the `make` targets reserve one GPU for the `api` and `ollama` services; otherwise they add `docker-compose.cpu.yml` and run on CPU, with much slower answers. Force either mode with `GPU=1` or `GPU=0` (for example `make start GPU=1`).
 - Roughly 15 GB of free disk for images and models (Ollama models, reranker, Docling models).
 
 ### 1. Clone and configure
@@ -150,9 +150,11 @@ uv sync --dev
 
 Edit `.env` and at least set `GRAFANA_ADMIN_PASSWORD`. Every other value has a working default; see [Configuration](#configuration).
 
-### 2. Add your PDFs
+### 2. Add your PDFs (optional)
 
 The repository does not ship financial reports, and the `data/` folder is git-ignored, so it does not exist after cloning. The UI and the API have no upload button: the RAG reads PDFs from a local folder.
+
+`make start` fills it for you: it downloads the latest results report of each of the 35 IBEX35 companies listed in `src/ingestion/report_sources.csv` and prints a green ✓ next to each company whose PDF passes verification (see [Data ingestion](#data-ingestion)). Follow the steps below only to add reports of your own.
 
 1. Create the folder from the repository root:
 
@@ -177,7 +179,7 @@ The repository does not ship financial reports, and the `data/` folder is git-ig
 
    The first word must be the canonical company name (see [Covered companies](#covered-companies)). Year and quarter are also detected from the document content, so the short form `COMPANY.pdf` is fine. Only `*.pdf` files directly inside `data/raw/pdfs/` are read; subfolders are ignored.
 
-The folder must contain at least one PDF before step 3, because `make start` ingests it when the Qdrant collection is empty. To add reports later, copy them into the same folder and run `make ingest`; files that are already indexed are skipped (see [Data ingestion](#data-ingestion)).
+`make start` ingests the folder when the Qdrant collection is empty or a PDF is newer than the last ingestion. To add reports later, copy them into the same folder and run `make ingest`; files that are already indexed are skipped (see [Data ingestion](#data-ingestion)).
 
 The API container sees the same folder as `/app/data/raw/pdfs` because `docker-compose.yml` mounts `./data` into it.
 
@@ -187,7 +189,7 @@ The API container sees the same folder as `/app/data/raw/pdfs` because `docker-c
 make start
 ```
 
-This builds and starts every service, waits for Ollama, Qdrant, Redis and the API to be healthy, pulls the Ollama models if they are missing, checks that the reranker and BM25 models are in the API image, and runs the initial ingestion if the Qdrant collection is empty. The first run takes a while (image build, model downloads, Docling extraction).
+This downloads and verifies the latest IBEX35 reports, builds and starts every service, waits for Ollama, Qdrant, Redis and the API to be healthy, pulls the Ollama models if they are missing, checks that the reranker and BM25 models are in the API image, and ingests the reports if the collection is empty or there are new ones. The first run takes a while (image build, model downloads, Docling extraction).
 
 ### 4. Ask a question
 
@@ -224,9 +226,18 @@ Ingestion has two phases:
 | 1. Extraction | Docling converts each PDF to Markdown with page-break markers, extracts tables with surrounding context and saves page images. Metadata (company, year, quarter, document type, ticker) is derived from the content and the filename and written to `.meta.json` sidecars. | `data/processed/rag_data/{markdown,tables,images}/<COMPANY>/...` |
 | 2. Indexing | Markdown is split per page and chunked (`CHUNK_SIZE=1200`, `CHUNK_OVERLAP=150`). Each chunk's year/quarter is re-detected from its own text. Chunks are embedded (dense + BM25) and written to Qdrant. Files are deduplicated by SHA-256, so re-running only indexes new files. | Qdrant collection `ibex35` |
 
+Before both phases, `make fetch` (run by `make start`) downloads the report of each company in `src/ingestion/report_sources.csv` into `data/raw/pdfs/` as `<COMPANY> financial_results <h1|9m> <year>.pdf`. A PDF is kept only if it passes verification; otherwise it is discarded and the company is listed with its results page so you can download it by hand:
+
+- it is a readable PDF (not an HTML page or a bot challenge) under 100 MB;
+- the company is the IBEX35 company the text names most often, so a report that only mentions it (a client, a lender, a parent) does not pass;
+- the period on its first pages is the expected one (`H1 2026`, `9M 2026`): the cover outweighs comparative tables, so last year's report or the next quarter's does not pass.
+
+The headline figure in the manifest is also looked up in the text; when it is missing the report is kept and the figure is shown in yellow, as the manifest may be wrong. Run `make fetch` on its own to refresh, or `uv run python src/ingestion/fetch_reports.py --only BBVA --force` to re-download one company. To move to a new reporting period, update the company's row (`period`, `url`, `key_figures`) in the manifest.
+
 Ways to run it:
 
 ```bash
+make fetch     # download and verify the latest reports
 make extract   # phase 1 only (PDF → Markdown)
 make ingest    # full pipeline: phase 1 + phase 2
 
@@ -338,7 +349,7 @@ Log lines carry the `trace_id`, so you can jump from a log to its trace. Metric 
 | Target | Description |
 |---|---|
 | `make help` | Lists every target with its description. |
-| `make` / `make start` | Full start-up: checks `.env` and Docker, starts the stack, pulls missing Ollama models, verifies the models baked into the API image, and runs the initial ingestion if the collection is empty. |
+| `make` / `make start` | Full start-up: checks `.env` and Docker, downloads and verifies the latest reports, starts the stack, pulls missing Ollama models, verifies the models baked into the API image, and ingests if the collection is empty or there are new reports. |
 | `make up` | Starts the containers and waits for Ollama, Qdrant, Redis and the API to be healthy. |
 | `make stop` | Stops and removes the containers (volumes are kept). |
 | `make restart` | Restarts the API container (picks up changes in `src/`). |
@@ -346,6 +357,7 @@ Log lines carry the `trace_id`, so you can jump from a log to its trace. Metric 
 | `make logs SVC=api` | Follows the logs of a service. |
 | `make status` | Container status. |
 | `make models` | Pulls the Ollama models from `.env` that are missing. |
+| `make fetch` | Downloads the latest results report of each IBEX35 company and keeps the ones that pass verification. |
 | `make extract` | Ingestion phase 1: PDF → Markdown with Docling. |
 | `make ingest` | Full ingestion: extraction + indexing in Qdrant. |
 | `make test` / `make test-unit` / `make test-integration` | Test suites. |
@@ -422,7 +434,7 @@ data/               (git-ignored) raw PDFs and processed RAG data
 
 ### Covered companies
 
-ACCIONA, ACERINOX, ACS, AENA, AMADEUS, ARCELORMITTAL, BBVA, CELLNEX, ENAGAS, ENDESA, FERROVIAL, FLUIDRA, GRIFOLS, IAG, IBERDROLA, INDITEX, INDRA, LOGISTA, MAPFRE, MERLINPROPERTIES, NATURGY, PUIG, REDEIA, REPSOL, ROVI, SACYR, SANTANDER, SOLARIA, TELEFONICA and UNICAJA.
+ACCIONA, ACCIONAENERGIA, ACERINOX, ACS, AENA, AMADEUS, ARCELORMITTAL, BANKINTER, BBVA, CAIXABANK, CELLNEX, COLONIAL, ENAGAS, ENDESA, FERROVIAL, FLUIDRA, GRIFOLS, IAG, IBERDROLA, INDITEX, INDRA, LOGISTA, MAPFRE, MERLINPROPERTIES, NATURGY, PUIG, REDEIA, REPSOL, ROVI, SABADELL, SACYR, SANTANDER, SOLARIA, TELEFONICA and UNICAJA.
 
 Company-to-ticker mapping lives in `COMPANY_TICKER_MAP` (`src/ingestion/metadata.py`); query aliases live in `_COMPANY_PATTERNS` (`src/rag/retrieval.py`). See [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-company) to add one.
 
@@ -431,7 +443,7 @@ Company-to-ticker mapping lives in `COMPANY_TICKER_MAP` (`src/ingestion/metadata
 | Symptom | Likely cause and fix |
 |---|---|
 | `make start` stops with `✗ .env is missing` | Run `cp .env.example .env`. |
-| `api` or `ollama` fails to start with a GPU error | No NVIDIA runtime. Install `nvidia-container-toolkit`, or remove the `deploy.resources` blocks for CPU-only use. |
+| `could not select device driver "nvidia" with capabilities: [[gpu]]` | Docker has no NVIDIA runtime. Install `nvidia-container-toolkit` and restart Docker, or run on CPU with `make start GPU=0` (the default when the runtime is missing). |
 | `make start` stops with `✗ Models missing from the image` | The BM25 and reranker models are baked into the API image at build time. Rebuild with `make build`. |
 | `/health` returns `207` | One dependency is down; the JSON body says which one (`vector_store`, `redis` or `ollama`). |
 | Answers say there is no data for a company | The company's PDF is missing or was not indexed. Check `data/raw/pdfs/`, run `make ingest`, and look at the Qdrant dashboard. |
@@ -460,6 +472,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, code style
 | [docs/api.md](docs/api.md) | Endpoint reference, SSE events, errors, caching and rate limiting |
 | [docs/configuration.md](docs/configuration.md) | Every environment variable and engine constant |
 | [docs/observability.md](docs/observability.md) | Metrics catalogue, dashboards, logs, traces, alerts |
+| [docs/qdrant-visualize.md](docs/qdrant-visualize.md) | Qdrant dashboard queries that explain how the chunks are distributed |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
 
 ## License

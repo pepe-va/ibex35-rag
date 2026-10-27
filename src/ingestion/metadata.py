@@ -7,13 +7,17 @@ from typing import Any
 
 COMPANY_TICKER_MAP: dict[str, str] = {
     "ACCIONA": "ANA.MC",
+    "ACCIONAENERGIA": "ANE.MC",
     "ACERINOX": "ACX.MC",
     "ACS": "ACS.MC",
     "AENA": "AENA.MC",
     "AMADEUS": "AMS.MC",
     "ARCELORMITTAL": "MTS.MC",
+    "BANKINTER": "BKT.MC",
     "BBVA": "BBVA.MC",
+    "CAIXABANK": "CABK.MC",
     "CELLNEX": "CLNX.MC",
+    "COLONIAL": "COL.MC",
     "ENAGAS": "ENG.MC",
     "ENDESA": "ELE.MC",
     "FERROVIAL": "FER.MC",
@@ -31,6 +35,7 @@ COMPANY_TICKER_MAP: dict[str, str] = {
     "REDEIA": "REE.MC",
     "REPSOL": "REP.MC",
     "ROVI": "ROVI.MC",
+    "SABADELL": "SAB.MC",
     "SACYR": "SCYR.MC",
     "SANTANDER": "SAN.MC",
     "SOLARIA": "SLR.MC",
@@ -156,9 +161,15 @@ def merge_metadata(from_filename: dict[str, Any], from_content: dict[str, Any]) 
 
 
 def build_metadata(stem: str, markdown_text: str) -> dict[str, Any]:
-    """Metadata from the document content, with the filename as fallback, plus the ticker."""
-    metadata = merge_metadata(
-        extract_metadata_from_filename(stem), extract_metadata_from_content(markdown_text)
-    )
+    """Metadata from the document content, with the filename as fallback, plus the ticker.
+
+    A known company in the filename wins over the content: reports often name another
+    IBEX35 company (a parent, a client, a lender) before their own.
+    """
+    from_filename = extract_metadata_from_filename(stem)
+    from_content = extract_metadata_from_content(markdown_text)
+    if from_filename["company"] in COMPANY_TICKER_MAP:
+        from_content.pop("company", None)
+    metadata = merge_metadata(from_filename, from_content)
     metadata["ticker"] = COMPANY_TICKER_MAP.get(metadata.get("company", ""), "UNKNOWN")
     return metadata
